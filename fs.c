@@ -6,6 +6,8 @@
 
 #include "simplefs.h"
 
+#define MODULE_NAME "simplefsrrw"
+
 /* Mount a simplefs partition */
 struct dentry *simplefs_mount(struct file_system_type *fs_type,
                               int flags,
@@ -32,14 +34,14 @@ void simplefs_kill_sb(struct super_block *sb)
 
 static struct file_system_type simplefs_file_system_type = {
     .owner = THIS_MODULE,
-    .name = "simplefs",
+    .name = "simplefs-rrw",
     .mount = simplefs_mount,
     .kill_sb = simplefs_kill_sb,
     .fs_flags = FS_REQUIRES_DEV,
     .next = NULL,
 };
 
-static int __init simplefs_init(void)
+static int __init simplefsrrw_init(void)
 {
     int ret = simplefs_init_inode_cache();
     if (ret) {
@@ -58,7 +60,7 @@ end:
     return ret;
 }
 
-static void __exit simplefs_exit(void)
+static void __exit simplefsrrw_exit(void)
 {
     int ret = unregister_filesystem(&simplefs_file_system_type);
     if (ret)
@@ -69,9 +71,9 @@ static void __exit simplefs_exit(void)
     pr_info("module unloaded\n");
 }
 
-module_init(simplefs_init);
-module_exit(simplefs_exit);
+module_init(simplefsrrw_init);
+module_exit(simplefsrrw_exit);
 
 MODULE_LICENSE("Dual BSD/GPL");
-MODULE_AUTHOR("National Cheng Kung University, Taiwan");
-MODULE_DESCRIPTION("a simple file system");
+MODULE_AUTHOR("National Cheng Kung University, Taiwan And Loheagn");
+MODULE_DESCRIPTION("a simple file system for rrw");
