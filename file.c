@@ -107,6 +107,7 @@ static void my_custom_readahead(struct readahead_control *rac)
     struct buffer_head *bh = NULL;
     char *keys = NULL;
 
+    // pr_info("loheagn try to read iblock %d", iblock);
     bh = read_by_iblock(inode, iblock);
     if (!bh) {
         // pr_info("loheagn get into bh null");
@@ -129,20 +130,24 @@ static void my_custom_readahead(struct readahead_control *rac)
 
         // pr_info("loheagn got page data");
 
-        unsigned long chunk_idx = index + i;  // 要读第几个chunk
+        unsigned long chunk_idx = index;  // 要读第几个chunk
 
-        if (chunk_idx >= iblock * chunk_pre_block) {
+        if (chunk_idx >= (iblock + 1) * chunk_pre_block) {
             iblock++;
             if (bh) {
                 brelse(bh);
             }
 
+            // pr_info("loheagn try to read iblock %d", iblock);
             bh = read_by_iblock(inode, iblock);
             keys = (char *) bh->b_data;
         }
 
         char key[65];
+
         hex_encode(key, keys + (chunk_idx % chunk_pre_block) * RRW_KEY_LENGTH);
+
+        // pr_info("loheagn chunk_idx %d key %s", chunk_idx, key);
 
         file_path = local_path(key);
 
