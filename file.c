@@ -9,6 +9,7 @@
 #include <linux/pagemap.h>
 #include <linux/path.h>
 #include <linux/namei.h>
+#include <linux/slab.h>
 
 #include "bitmap.h"
 #include "simplefs.h"
@@ -21,7 +22,7 @@ static struct buffer_head *read_by_iblock(struct inode *inode, sector_t iblock)
 {
     struct buffer_head *bh = NULL;
     struct super_block *sb = inode->i_sb;
-    struct simplefs_sb_info *sbi = SIMPLEFS_SB(sb);
+    // struct simplefs_sb_info *sbi = SIMPLEFS_SB(sb);
     struct simplefs_inode_info *ci = SIMPLEFS_INODE(inode);
     struct simplefs_file_ei_block *index;
     struct buffer_head *bh_index;
@@ -60,8 +61,9 @@ const char hex_table[16] = "0123456789abcdef";
 static void hex_encode(char *dst, const char *src)
 {
     int j = 0;
-    for (int i = 0; i < 32; i++) {
-        char v = *(src + i);
+    int i = 0;
+    for (i = 0; i < 32; i++) {
+        unsigned char v = *(src + i);
         dst[j++] = hex_table[v >> 4];
         dst[j++] = hex_table[v & 0xf];
     }
@@ -107,6 +109,8 @@ static void my_custom_readahead(struct readahead_control *rac)
     struct buffer_head *bh = NULL;
     char *keys = NULL;
 
+    unsigned long i = 0;
+
     // pr_info("loheagn try to read iblock %d", iblock);
     bh = read_by_iblock(inode, iblock);
     if (!bh) {
@@ -118,7 +122,7 @@ static void my_custom_readahead(struct readahead_control *rac)
     char *file_path = NULL;
 
     // 遍历所有需要读取的页
-    for (unsigned long i = 0; i < nr_pages; i++, index++) {
+    for (i = 0; i < nr_pages; i++, index++) {
         // pr_info("loheagn get into for i %d", i);
         struct page *page = readahead_page(rac);  // 获取一个新的页
         char *page_data;
@@ -214,6 +218,104 @@ end:
     if (bh) {
         brelse(bh);
     }
+}
+
+static int my_custom_readpage(struct file *file, struct page *page)
+{
+    struct inode *inode = file->f_inode;
+    unsigned long index = page->index;
+
+    unsigned long chunk_pre_block = PAGE_SIZE / RRW_KEY_LENGTH;
+
+    unsigned long iblock = index / chunk_pre_block;
+
+    struct buffer_head *bh = NULL;
+    char *keys = NULL;
+
+    // pr_info("loheagn try to read iblock %d", iblock);
+    bh = read_by_iblock(inode, iblock);
+    if (!bh) {
+        // pr_info("loheagn get into bh null");
+        return 0;
+    }
+    keys = (char *) bh->b_data;
+
+    char *file_path = NULL;
+
+        char *page_data  = kmap(page);
+
+        // pr_info("loheagn got page data");
+
+        unsigned long chunk_idx = index;  // 要读第几个chunk
+
+        char key[65];
+
+        hex_encode(key, keys + (chunk_idx % chunk_pre_block) * RRW_KEY_LENGTH);
+
+        pr_info("loheagn chunk_idx %d key %s", chunk_idx, key);
+
+        file_path = local_path(key);
+
+        struct path path;
+        if (kern_path(file_path, 0, &path)) {
+            // file not exist
+            kfree(file_path);
+            file_path = nfs_path(key);
+        } else {
+            // file exists, release path
+            path_put(&path);
+        }
+
+        struct file *f = filp_open(file_path, O_RDONLY, 0);
+        if (IS_ERR_OR_NULL(f)) {
+            printk(KERN_ERR "loheagn3 Failed to open file %s\n", file_path);
+            goto end;
+        }
+
+        size_t length = PAGE_SIZE;
+        if (length > f->f_inode->i_size) {
+            length = f->f_inode->i_size;
+        }
+        // pr_info("loheagn length %d", length);
+
+        loff_t offset = 0;
+        kernel_read(f, page_data, length, &offset);
+
+        filp_close(f, NULL);
+
+        if (file_path) {
+            kfree(file_path);
+            file_path = NULL;
+        }
+
+        // 清零剩余部分
+        if (length < PAGE_SIZE) {
+            memset(page_data + length, 0, PAGE_SIZE - length);
+        }
+
+        // pr_info("loheagn copy done length %d", length);
+
+        // 解除页的映射
+        kunmap(page);
+
+        // 将页标记为已更新并解锁
+        SetPageUptodate(page);
+        unlock_page(page);
+
+        // 将页放入页缓存
+        put_page(page);
+
+end:
+
+    if (file_path) {
+        kfree(file_path);
+    }
+
+    if (bh) {
+        brelse(bh);
+    }
+
+    return 0;
 }
 
 /* Associate the provided 'buffer_head' parameter with the iblock-th block of
@@ -445,7 +547,7 @@ const struct address_space_operations simplefs_aops = {
     // .readahead = simplefs_readahead,
     .readahead = my_custom_readahead,
 #else
-    .readpage = simplefs_readpage,
+    .readpage = my_custom_readpage,
 #endif
     .writepage = simplefs_writepage,
     .write_begin = simplefs_write_begin,
