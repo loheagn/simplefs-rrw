@@ -187,8 +187,6 @@ static void my_custom_readahead(struct readahead_control *rac)
             file_path = NULL;
         }
 
-
-
         // 清零剩余部分
         if (length < PAGE_SIZE) {
             memset(page_data + length, 0, PAGE_SIZE - length);
@@ -242,68 +240,68 @@ static int my_custom_readpage(struct file *file, struct page *page)
 
     char *file_path = NULL;
 
-        char *page_data  = kmap(page);
+    char *page_data = kmap(page);
 
-        // pr_info("loheagn got page data");
+    // pr_info("loheagn got page data");
 
-        unsigned long chunk_idx = index;  // 要读第几个chunk
+    unsigned long chunk_idx = index;  // 要读第几个chunk
 
-        char key[65];
+    char key[65];
 
-        hex_encode(key, keys + (chunk_idx % chunk_pre_block) * RRW_KEY_LENGTH);
+    hex_encode(key, keys + (chunk_idx % chunk_pre_block) * RRW_KEY_LENGTH);
 
-        pr_info("loheagn chunk_idx %d key %s", chunk_idx, key);
+    pr_info("loheagn chunk_idx %d key %s", chunk_idx, key);
 
-        file_path = local_path(key);
+    file_path = local_path(key);
 
-        struct path path;
-        if (kern_path(file_path, 0, &path)) {
-            // file not exist
-            kfree(file_path);
-            file_path = nfs_path(key);
-        } else {
-            // file exists, release path
-            path_put(&path);
-        }
+    struct path path;
+    if (kern_path(file_path, 0, &path)) {
+        // file not exist
+        kfree(file_path);
+        file_path = nfs_path(key);
+    } else {
+        // file exists, release path
+        path_put(&path);
+    }
 
-        struct file *f = filp_open(file_path, O_RDONLY, 0);
-        if (IS_ERR_OR_NULL(f)) {
-            printk(KERN_ERR "loheagn3 Failed to open file %s\n", file_path);
-            goto end;
-        }
+    struct file *f = filp_open(file_path, O_RDONLY, 0);
+    if (IS_ERR_OR_NULL(f)) {
+        printk(KERN_ERR "loheagn3 Failed to open file %s\n", file_path);
+        goto end;
+    }
 
-        size_t length = PAGE_SIZE;
-        if (length > f->f_inode->i_size) {
-            length = f->f_inode->i_size;
-        }
-        // pr_info("loheagn length %d", length);
+    size_t length = PAGE_SIZE;
+    if (length > f->f_inode->i_size) {
+        length = f->f_inode->i_size;
+    }
+    // pr_info("loheagn length %d", length);
 
-        loff_t offset = 0;
-        kernel_read(f, page_data, length, &offset);
+    loff_t offset = 0;
+    kernel_read(f, page_data, length, &offset);
 
-        filp_close(f, NULL);
+    filp_close(f, NULL);
 
-        if (file_path) {
-            kfree(file_path);
-            file_path = NULL;
-        }
+    if (file_path) {
+        kfree(file_path);
+        file_path = NULL;
+    }
 
-        // 清零剩余部分
-        if (length < PAGE_SIZE) {
-            memset(page_data + length, 0, PAGE_SIZE - length);
-        }
+    // 清零剩余部分
+    if (length < PAGE_SIZE) {
+        memset(page_data + length, 0, PAGE_SIZE - length);
+    }
 
-        // pr_info("loheagn copy done length %d", length);
+    // pr_info("loheagn copy done length %d", length);
 
-        // 解除页的映射
-        kunmap(page);
+    // 解除页的映射
+    kunmap(page);
 
-        // 将页标记为已更新并解锁
-        SetPageUptodate(page);
-        unlock_page(page);
+    // 将页标记为已更新并解锁
+    SetPageUptodate(page);
+    unlock_page(page);
 
-        // 将页放入页缓存
-        put_page(page);
+    // 将页放入页缓存
+    put_page(page);
 
 end:
 
@@ -314,6 +312,121 @@ end:
     if (bh) {
         brelse(bh);
     }
+
+    return 0;
+}
+
+
+// 自定义的页面错误处理函数
+static vm_fault_t myfs_vm_fault(struct vm_fault *vmf)
+{
+    struct file *file;
+    struct page *page;
+    struct inode *inode;
+    loff_t file_size, offset;
+    char *page_addr;
+    ssize_t read_bytes;
+
+
+    // find the chunk file
+    unsigned long index = vmf->pgoff;
+    unsigned long chunk_pre_block = PAGE_SIZE / RRW_KEY_LENGTH;
+    unsigned long iblock = index / chunk_pre_block;
+
+    struct file *this_file = vmf->vma->vm_file;
+    struct inode *this_inode = this_file->f_inode;
+    struct buffer_head *bh = read_by_iblock(this_inode, iblock);
+    if (!bh) {
+        return VM_FAULT_SIGBUS;
+    }
+
+    char *keys = (char *) bh->b_data;
+    char key[65];
+    hex_encode(key, keys + (index % chunk_pre_block) * RRW_KEY_LENGTH);
+
+    brelse(bh);
+
+    char *file_path = local_path(key);
+
+    struct path path;
+    if (kern_path(file_path, 0, &path)) {
+        // file not exist
+        kfree(file_path);
+        file_path = nfs_path(key);
+    } else {
+        // file exists, release path
+        path_put(&path);
+    }
+
+    file = filp_open(file_path, O_RDONLY, 0);
+    if (IS_ERR(file)) {
+        return VM_FAULT_SIGBUS;
+    }
+
+    kfree(file_path);
+
+    // 获取一个新的页面
+    page = alloc_page(GFP_KERNEL);
+    if (!page) {
+        filp_close(file, 0);
+        return VM_FAULT_OOM;
+    }
+
+    // 填充页面内容
+    page_addr = kmap(page);
+    offset = 0;
+    read_bytes = kernel_read(file, page_addr, PAGE_SIZE, &offset);
+    pr_info("loheagn read %d bytes for page %d", read_bytes, index);
+    if (read_bytes < PAGE_SIZE) {
+        // 文件剩余内容可能小于一个页面大小或读取发生错误
+        clear_highpage(page);
+        if (read_bytes > 0) {
+            // 复制实际读取到的字节
+            memcpy(page_addr, page_addr, read_bytes);
+        }
+    }
+    // pr_info("loheagn 1");
+    kunmap(page);
+    // pr_info("loheagn 2");
+    // 取消对文件的引用
+    filp_close(file, 0);
+    // pr_info("loheagn 3");
+
+    // 将读取到的页面插入到线性区域
+    // if (vm_insert_page(vmf->vma, vmf->address, page)) {
+    //     // 在失败的情况下释放页面并返回错误
+    //     pr_info("loheagn 4");
+    //     __free_pages(page, 0);
+    //     return VM_FAULT_SIGBUS;
+    // }
+    vmf->page = page;
+    // pr_info("loheagn 5");
+
+    // 标记页面为脏，如果它被写入的话
+    set_page_dirty_lock(page);
+
+    // pr_info("loheagn 6");
+    return 0;
+
+    // return VM_FAULT_NOPAGE;  // 或者其他适当的 vm_fault_t 返回值
+}
+
+// 自定义的 vm_operations_struct
+static const struct vm_operations_struct myfs_vm_ops = {
+    .fault = myfs_vm_fault,
+};
+
+
+// 文件系统中的 mmap 方法的一个简单示例
+static int myfs_mmap(struct file *file, struct vm_area_struct *vma)
+{
+    // 确认 VMA 是有效的，而且可以被 mmap
+    if (vma->vm_start & (~PAGE_MASK))
+        return -ENXIO;
+
+    // 设置自定义的 fault 处理函数，自行实现
+    // vma->vm_flags |= VM_IO;
+    vma->vm_ops = &myfs_vm_ops;
 
     return 0;
 }
@@ -555,6 +668,7 @@ const struct address_space_operations simplefs_aops = {
 };
 
 const struct file_operations simplefs_file_ops = {
+    .mmap = myfs_mmap,
     .llseek = generic_file_llseek,
     .owner = THIS_MODULE,
     .read_iter = generic_file_read_iter,
