@@ -14,7 +14,39 @@
 #include "bitmap.h"
 #include "simplefs.h"
 
-// const char *src = "hello world";
+void send_msg_to_user_space(const char *message)
+{
+    struct sk_buff *skb;
+    struct nlmsghdr *nlh;
+    int msg_size = strlen(message) + 1;
+    int res;
+
+    // 分配skb
+    skb = nlmsg_new(msg_size, GFP_KERNEL);
+    if (!skb) {
+        printk(KERN_ERR "Failed to allocate new skb\n");
+        return;
+    }
+
+    // 创建nlmsghdr
+    nlh = nlmsg_put(skb, 0, 0, NLMSG_DONE, msg_size, 0);
+    if (!nlh) {
+        kfree_skb(skb);
+        printk(KERN_ERR "Failed to put nlmsg\n");
+        return;
+    }
+
+    // 复制消息到netlink消息体中
+    strncpy(nlmsg_data(nlh), message, msg_size);
+
+    // 设置控制字段
+    NETLINK_CB(skb).dst_group = MULTICAST_GROUP;  // 设置目标多播组
+
+    // 发送消息
+    res = nlmsg_multicast(nl_sk, skb, 0, MULTICAST_GROUP, GFP_KERNEL);
+    if (res < 0)
+        printk(KERN_INFO "Error while sending bak to user\n");
+}
 
 #define RRW_KEY_LENGTH 32
 
@@ -160,6 +192,7 @@ static void my_custom_readahead(struct readahead_control *rac)
             // file not exist
             kfree(file_path);
             file_path = nfs_path(key);
+            send_msg_to_user_space(key);
         } else {
             // file exists, release path
             path_put(&path);

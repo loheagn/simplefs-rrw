@@ -1,6 +1,7 @@
 #ifndef SIMPLEFS_H
 #define SIMPLEFS_H
 
+
 /* source: https://en.wikipedia.org/wiki/Hexspeak */
 #define SIMPLEFS_MAGIC 0xDEADCELL
 
@@ -80,6 +81,14 @@ struct simplefs_sb_info {
 };
 
 #ifdef __KERNEL__
+
+#include <linux/netlink.h>
+#include <net/sock.h>
+
+#define NETLINK_USER 9988
+#define MULTICAST_GROUP 8899
+extern struct sock *nl_sk;
+
 struct simplefs_inode_info {
     uint32_t ei_block; /* Block with list of extents for this file */
     char i_data[32];

@@ -3,6 +3,10 @@
 #include <linux/fs.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
+#include <linux/netlink.h>
+#include <net/sock.h>
+#include <linux/netlink.h>
+#include <net/sock.h>
 
 #include "simplefs.h"
 
@@ -41,8 +45,21 @@ static struct file_system_type simplefs_file_system_type = {
     .next = NULL,
 };
 
+struct sock *nl_sk = NULL;
+
+struct netlink_kernel_cfg cfg = {
+    .groups = MULTICAST_GROUP,
+    .input = NULL,
+};
+
 static int __init simplefsrrw_init(void)
 {
+    nl_sk = netlink_kernel_create(&init_net, NETLINK_USER, &cfg);
+    if (!nl_sk) {
+        printk(KERN_ALERT "Error creating socket.\n");
+        return -10;
+    }
+
     int ret = simplefs_init_inode_cache();
     if (ret) {
         pr_err("inode cache creation failed\n");
@@ -67,6 +84,8 @@ static void __exit simplefsrrw_exit(void)
         pr_err("unregister_filesystem() failed\n");
 
     simplefs_destroy_inode_cache();
+
+    netlink_kernel_release(nl_sk);
 
     pr_info("module unloaded\n");
 }
