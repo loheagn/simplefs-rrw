@@ -85,8 +85,8 @@ struct simplefs_sb_info {
 #include <linux/netlink.h>
 #include <net/sock.h>
 
-#define NETLINK_USER 9988
-#define MULTICAST_GROUP 8899
+#define NETLINK_USER 31
+#define MULTICAST_GROUP 1
 extern struct sock *nl_sk;
 
 struct simplefs_inode_info {
