@@ -13,7 +13,39 @@
 #include "bitmap.h"
 #include "simplefs.h"
 
-// const char *src = "hello world";
+void send_msg_to_user_space(const char *message)
+{
+    struct sk_buff *skb;
+    struct nlmsghdr *nlh;
+    int msg_size = strlen(message) + 1;
+    int res;
+
+    // 分配skb
+    skb = nlmsg_new(msg_size, GFP_KERNEL);
+    if (!skb) {
+        printk(KERN_ERR "Failed to allocate new skb\n");
+        return;
+    }
+
+    // 创建nlmsghdr
+    nlh = nlmsg_put(skb, 0, 0, NLMSG_DONE, msg_size, 0);
+    if (!nlh) {
+        kfree_skb(skb);
+        printk(KERN_ERR "Failed to put nlmsg\n");
+        return;
+    }
+
+    // 复制消息到netlink消息体中
+    strncpy(nlmsg_data(nlh), message, msg_size);
+
+    // 设置控制字段
+    NETLINK_CB(skb).dst_group = MULTICAST_GROUP;  // 设置目标多播组
+
+    // 发送消息
+    res = nlmsg_multicast(nl_sk, skb, 0, MULTICAST_GROUP, GFP_KERNEL);
+    if (res < 0)
+        printk(KERN_INFO "Error while sending bak to user\n");
+}
 
 #define RRW_KEY_LENGTH 32
 
@@ -60,7 +92,8 @@ const char hex_table[16] = "0123456789abcdef";
 static void hex_encode(char *dst, const char *src)
 {
     int j = 0;
-    for (int i = 0; i < 32; i++) {
+    int i = 0;
+    for (i = 0; i < 32; i++) {
         char v = *(src + i);
         dst[j++] = hex_table[v >> 4];
         dst[j++] = hex_table[v & 0xf];
@@ -117,8 +150,10 @@ static void my_custom_readahead(struct readahead_control *rac)
 
     char *file_path = NULL;
 
+    unsigned long i = 0;
+
     // 遍历所有需要读取的页
-    for (unsigned long i = 0; i < nr_pages; i++, index++) {
+    for (i = 0; i < nr_pages; i++, index++) {
         // pr_info("loheagn get into for i %d", i);
         struct page *page = readahead_page(rac);  // 获取一个新的页
         char *page_data;
@@ -156,6 +191,7 @@ static void my_custom_readahead(struct readahead_control *rac)
             // file not exist
             kfree(file_path);
             file_path = nfs_path(key);
+            send_msg_to_user_space(key);
         } else {
             // file exists, release path
             path_put(&path);
