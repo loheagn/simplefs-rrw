@@ -34,7 +34,7 @@ void simplefs_kill_sb(struct super_block *sb)
 
 static struct file_system_type simplefs_file_system_type = {
     .owner = THIS_MODULE,
-    .name = "simplefs-rrw",
+    .name = "simplefsrrw",
     .mount = simplefs_mount,
     .kill_sb = simplefs_kill_sb,
     .fs_flags = FS_REQUIRES_DEV,
