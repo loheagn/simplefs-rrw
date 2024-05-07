@@ -9,6 +9,13 @@
 #include "bitmap.h"
 #include "simplefs.h"
 
+static unsigned long ramfs_mmu_get_unmapped_area(struct file *file,
+		unsigned long addr, unsigned long len, unsigned long pgoff,
+		unsigned long flags)
+{
+	return current->mm->get_unmapped_area(file, addr, len, pgoff, flags);
+}
+
 /* Associate the provided 'buffer_head' parameter with the iblock-th block of
  * the file denoted by inode. Should the specified block be unallocated and the
  * create flag is set to true, proceed to allocate a new block on the disk and
@@ -250,4 +257,7 @@ const struct file_operations simplefs_file_ops = {
     .read_iter = generic_file_read_iter,
     .write_iter = generic_file_write_iter,
     .fsync = generic_file_fsync,
+
+    .mmap		= generic_file_mmap,
+    .get_unmapped_area	= ramfs_mmu_get_unmapped_area,
 };
